@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+COMPILADOR UNIFICADO  —  MENÚ PRINCIPAL + 2 ANALIZADORES (todo en un solo archivo)
 
+Uso:
+    python CompiladorUnificado.py              -> abre el menú principal
+    python CompiladorUnificado.py archivo.c    -> abre directo el analizador de código
+                                                  con ese archivo (al cerrarlo vuelve al menú)
+
+Opciones del menú:
+    1) Analizador léxico y sintáctico de CÓDIGO (C, C++, Java, JavaScript, Python...)
+       Tokens, árbol sintáctico gráfico y de texto, y lista de errores.
+    2) Analizador sintáctico de EXPRESIONES ARITMÉTICAS
+       Árbol sintáctico con valores, árbol de derivación, derivación paso a paso,
+       tokens, gramática y evaluación del resultado.
+
+Dentro de cada analizador, el botón «⬅ Menú» (o cerrar la ventana) vuelve al menú.
+Atajos del menú: tecla 1, tecla 2, Esc para salir.
+"""
 import re
 import sys
 import tkinter as tk
@@ -155,18 +172,16 @@ class AnalizadorLexico:
             "&=", "|=", "^=", "<<", ">>", "**", "??", "?.", ":=",
             "+", "-", "*", "/", "%", "=", "<", ">", "!", "&", "|", "^", "~", "?", ".", "@"]
 
-    _PFX = r"(?:[rRbBfFuU]{1,2})?"      # prefijo de cadena: f"..", r"..", b"..", rb"..", etc.
-
     _PATRON = re.compile("|".join(f"(?P<{n}>{p})" for n, p in [
         ("COMBLOQ", r"/\*.*?(?:\*/|\Z)"),
         ("COMLIN", r"//[^\n]*"),
         ("DIRECT", r"\#[ \t]*(?:include|define|undef|ifdef|ifndef|if|else|elif|endif|"
                    r"pragma|error)\b[^\n]*"),
         ("COMHASH", r"\#[^\n]*"),
-        ("CADTRI1", _PFX + r'""".*?(?:"""|\Z)'),
-        ("CADTRI2", _PFX + r"'''.*?(?:'''|\Z)"),
-        ("CAD1", _PFX + r'"(?:\\.|[^"\\\n])*"?'),
-        ("CAD2", _PFX + r"'(?:\\.|[^'\\\n])*'?"),
+        ("CADTRI1", r'""".*?(?:"""|\Z)'),
+        ("CADTRI2", r"'''.*?(?:'''|\Z)"),
+        ("CAD1", r'"(?:\\.|[^"\\\n])*"?'),
+        ("CAD2", r"'(?:\\.|[^'\\\n])*'?"),
         ("CAD3", r"`(?:\\.|[^`\\])*`?"),
         ("CADTIP", r"[“”„«][^“”„«»\n]*[“”»]?"),
         ("CADTIP2", r"[‘’][^‘’\n]*[‘’]?"),
@@ -232,13 +247,11 @@ class AnalizadorLexico:
     def _avisos(self, tipo, g, lex, linea, col):
         if g == "COMBLOQ" and not lex.endswith("*/"):
             self.errores.append(f"Línea {linea}, col {col}: comentario de bloque sin cerrar")
-        elif g in ("CAD1", "CAD2") and (len(lex.lstrip("rRbBfFuU")) < 2 or
-                                        lex[-1] != lex.lstrip("rRbBfFuU")[0]):
+        elif g in ("CAD1", "CAD2") and (len(lex) < 2 or lex[-1] != lex[0]):
             self.errores.append(f"Línea {linea}, col {col}: cadena sin cerrar {lex[:20]!r}")
         elif g == "CAD3" and (len(lex) < 2 or lex[-1] != "`"):
             self.errores.append(f"Línea {linea}, col {col}: cadena sin cerrar")
-        elif g in ("CADTRI1", "CADTRI2") and (len(lex.lstrip("rRbBfFuU")) < 6 or
-                                              lex[-3:] != lex.lstrip("rRbBfFuU")[:3]):
+        elif g in ("CADTRI1", "CADTRI2") and (len(lex) < 6 or lex[-3:] != lex[:3]):
             self.errores.append(f"Línea {linea}, col {col}: cadena de triple comilla sin cerrar")
         elif tipo == DESC:
             self.errores.append(f"Línea {linea}, col {col}: carácter desconocido {lex!r}")
@@ -1217,109 +1230,21 @@ EJEMPLOS_CODIGO_ERROR = {
 }
 
 
-# --------------------------------------------------------------------------
-# Árbol de PRESENTACIÓN: el árbol del parser se traduce a un árbol más descriptivo
-# (p. ej. Llamada a función -> Identificador / Paréntesis / Argumentos -> Lista -> Expresión)
-# --------------------------------------------------------------------------
-CAT_EST, CAT_OPE, CAT_IDE, CAT_VAL, CAT_AUX, CAT_ERR = "est", "ope", "ide", "val", "aux", "err"
-
-# categoría -> (color de relleno, color de borde)
-ESTILO_NODO = {
-    CAT_EST: ("#4a1fb8", "#c4b5fd"),    # estructura: programa, sentencias, bloques
-    CAT_OPE: ("#d9531e", "#ffb48a"),    # operaciones, llamadas, asignaciones
-    CAT_IDE: ("#0a46f0", "#4cc3ff"),    # identificadores y variables
-    CAT_VAL: ("#007a8c", "#22e0f5"),    # números, cadenas, literales
-    CAT_AUX: ("#2b4a5a", "#7dd3fc"),    # nodos auxiliares: paréntesis, argumentos...
-    CAT_ERR: ("#c62828", "#ff9a9a"),    # errores
-}
-COLOR_FLECHA = "#1aa3ff"
-LEYENDA_ARBOL = (("Estructura", CAT_EST), ("Operación", CAT_OPE), ("Identificador", CAT_IDE),
-                 ("Valor", CAT_VAL), ("Auxiliar", CAT_AUX), ("Error", CAT_ERR))
-
-NOMBRES_SENTENCIA = {
-    "if": "Condicional if", "elif": "Condicional elif", "elsif": "Condicional elsif",
-    "else": "Condicional else", "for": "Ciclo for", "foreach": "Ciclo foreach",
-    "while": "Ciclo while", "do-while": "Ciclo do-while", "until": "Ciclo until",
-    "switch": "Selección switch", "try": "Bloque try", "except": "Bloque except",
-    "catch": "Bloque catch", "finally": "Bloque finally", "with": "Contexto with",
-    "return": "Retorno (return)", "break": "Salto break", "continue": "Salto continue",
-    "import": "Importación import", "from": "Importación from",
-}
-_OPERACIONES = {"Asignación", "Operador ternario", "Expresión condicional", "Función flecha",
-                "Llamada a función", "Acceso a miembro", "Acceso por índice",
-                "Conversión (cast)", "Lambda"}
-
-
-def _categoria(titulo):
-    if titulo == "Error":
-        return CAT_ERR
-    if titulo in ("Número", "Cadena", "Literal", "Palabra reservada"):
-        return CAT_VAL
-    if titulo in ("Identificador", "Variable", "Parámetro", "Miembro"):
-        return CAT_IDE
-    if titulo.startswith("Operación") or titulo in _OPERACIONES:
-        return CAT_OPE
-    if titulo.startswith(("Sentencia", "Condicional", "Ciclo", "Selección", "Retorno", "Salto",
-                          "Importación", "Contexto", "Bloque", "Definición", "Función",
-                          "Prototipo", "Etiqueta", "Condición", "Cabecera", "Declaración",
-                          "Programa", "Anotación")):
-        return CAT_EST
-    return CAT_AUX
-
-
-def _v(titulo, valor=None, hijos=None, linea=0, cat=None, ver_linea=False):
-    """Crea un nodo de presentación (reutiliza NodoCodigo + categoría + si muestra la línea)."""
-    nodo = NodoCodigo(titulo, valor or None, hijos, linea)
-    nodo.cat = cat or _categoria(titulo)
-    nodo.ver_linea = ver_linea
-    return nodo
-
-
-def a_vista(n):
-    """Traduce el árbol del analizador sintáctico a un árbol descriptivo para mostrar."""
-    t, v, h = n.tipo, n.valor, n.hijos
-
-    def hijos():
-        return [a_vista(x) for x in h]
-
-    if t == "Llamada":
-        args = h[1].hijos if len(h) > 1 else []
-        if args:
-            lista = _v("Lista de argumentos", cat=CAT_AUX,
-                       hijos=[_v("Expresión", cat=CAT_AUX, hijos=[a_vista(a)]) for a in args])
-            argumentos = _v("Argumentos", cat=CAT_AUX, hijos=[lista])
-        else:
-            argumentos = _v("Argumentos", "ninguno", cat=CAT_AUX)
-        return _v("Llamada a función", linea=n.linea,
-                  hijos=[a_vista(h[0]), _v("Paréntesis", "( )", cat=CAT_AUX), argumentos])
-    if t.startswith("Sentencia "):
-        titulo = NOMBRES_SENTENCIA.get(t[len("Sentencia "):].lower(), t)
-        return _v(titulo, v, hijos(), n.linea, ver_linea=True)
-    if t.startswith("Definición ") or t in ("Función", "Prototipo de función", "Declaración"):
-        return _v(t, v, hijos(), n.linea, ver_linea=True)
-    if t == "Acceso":
-        return _v("Acceso a miembro", v, hijos(), n.linea)
-    if t == "Índice":
-        return _v("Acceso por índice", None, hijos(), n.linea)
-    if t == "Agrupación":
-        return _v("Agrupación", "( )", hijos(), n.linea, cat=CAT_AUX)
-    if t == "Lista":
-        return _v("Lista", "[ ]", hijos(), n.linea, cat=CAT_AUX)
-    if t.startswith("Literal de objeto"):
-        return _v("Objeto / diccionario", "{ }", hijos(), n.linea, cat=CAT_AUX)
-    return _v(t, v, hijos(), n.linea)
-
-
-def etiquetas_vista(n):
-    """(línea de arriba, línea de abajo, ¿tiene valor?) del texto que lleva cada nodo."""
-    v = "" if n.valor in (None, "") else str(n.valor).replace("\n", " ")
-    if len(v) > 28:
-        v = v[:27] + "…"
-    t = n.tipo if len(n.tipo) <= 30 else n.tipo[:29] + "…"
-    ln = f"({n.linea})" if getattr(n, "ver_linea", False) and n.linea else ""
-    if v:
-        return (f"{t} {ln}".strip(), v, True)
-    return (t, ln, False)
+def color_de(n):
+    t = n.tipo
+    if t == "Error":
+        return "#c62828"
+    if t in ("Número", "Cadena", "Literal"):
+        return "#00838f"
+    if t in ("Identificador", "Variable", "Parámetro", "Miembro"):
+        return "#1e4fd8"
+    if t.startswith("Operación") or t in ("Asignación", "Operador ternario",
+                                          "Expresión condicional", "Función flecha"):
+        return "#c2561a"
+    if t.startswith(("Sentencia", "Definición", "Función", "Prototipo", "Bloque",
+                     "Etiqueta", "Condición", "Cabecera", "Declaración", "Programa")):
+        return "#6a3fb5"
+    return "#37474f"
 
 
 class AppCodigo(_CierraLimpio, tk.Tk):
@@ -1333,16 +1258,12 @@ class AppCodigo(_CierraLimpio, tk.Tk):
         self.configure(bg=BG)
         self.resultado = None
         self.escala = 1.0
-        self.items = []
-        self.sel = None
-        self.vista = None
-        self.ampliado = False
-        self._arriba = []
+        self.pos = {}
+        self.textos_nodo = {}
         self._estilos()
         self._construir()
         self.bind("<Control-Return>", lambda e: self.analizar())
         self.bind("<F5>", lambda e: self.analizar())
-        self.bind("<F11>", lambda e: self.alternar_ampliado())
         self.editor.focus_set()
 
     # ------------------------------------------------------------ estilos
@@ -1382,13 +1303,10 @@ class AppCodigo(_CierraLimpio, tk.Tk):
 
     # -------------------------------------------------------- construcción
     def _construir(self):
-        t1 = tk.Label(self, text="ANALIZADOR LÉXICO Y SINTÁCTICO", bg=BG, fg=ACENTO,
-                      font=("Segoe UI", 22, "bold"))
-        t1.pack(pady=(14, 4))
-        t2 = tk.Label(self, text="Escribe o pega tu código y pulsa ANALIZAR  (atajo: Ctrl+Enter o F5)",
-                      bg=BG, fg=TXT2, font=("Segoe UI", 10))
-        t2.pack()
-        self._arriba = [t1, t2]
+        tk.Label(self, text="ANALIZADOR LÉXICO Y SINTÁCTICO", bg=BG, fg=ACENTO,
+                 font=("Segoe UI", 22, "bold")).pack(pady=(14, 4))
+        tk.Label(self, text="Escribe o pega tu código y pulsa ANALIZAR  (atajo: Ctrl+Enter o F5)",
+                 bg=BG, fg=TXT2, font=("Segoe UI", 10)).pack()
 
         # --- editor
         marco = tk.Frame(self, bg=ACENTO, padx=2, pady=2)
@@ -1434,8 +1352,6 @@ class AppCodigo(_CierraLimpio, tk.Tk):
         self.cb_pyc.set("Automático")
         self.cb_pyc.pack(side="left", padx=6)
 
-        self._arriba += [marco, barra, sel]
-
         # --- pestañas
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=24, pady=(0, 6))
@@ -1464,21 +1380,16 @@ class AppCodigo(_CierraLimpio, tk.Tk):
                       font=("Segoe UI", 10, "bold"), padx=14, pady=4,
                       activebackground="#1b2a50", activeforeground=TXT,
                       cursor="hand2").pack(side="left", padx=(6, 0), pady=6)
-        self.btn_ampliar = tk.Button(tb, text="⤢ Ampliar", command=self.alternar_ampliado,
-                                     bg=PANEL2, fg=TXT, relief="flat", bd=0,
-                                     font=("Segoe UI", 10, "bold"), padx=14, pady=4,
-                                     activebackground="#1b2a50", activeforeground=TXT,
-                                     cursor="hand2")
-        self.btn_ampliar.pack(side="left", padx=(6, 0), pady=6)
-        for txt, cat in LEYENDA_ARBOL:
-            col = ESTILO_NODO[cat][1]
+        for txt, col in (("Identificador", "#1e4fd8"), ("Valor", "#00838f"),
+                         ("Operación", "#c2561a"), ("Estructura", "#6a3fb5"),
+                         ("Error", "#c62828")):
             tk.Label(tb, text="●", fg=col, bg=PANEL, font=("Segoe UI", 12)).pack(side="left", padx=(14, 0))
             tk.Label(tb, text=txt, fg=TXT2, bg=PANEL, font=("Segoe UI", 9)).pack(side="left")
-        tk.Label(tb, text="Clic: detalle · Ctrl+rueda: zoom", fg=TXT2,
+        tk.Label(tb, text="Clic: detalle · Ctrl+rueda: zoom · Arrastrar: mover", fg=TXT2,
                  bg=PANEL, font=("Segoe UI", 9)).pack(side="right", padx=10)
         cuerpo = tk.Frame(f_arb, bg=PANEL2)
         cuerpo.pack(fill="both", expand=True)
-        self.cv = tk.Canvas(cuerpo, bg="#060d24", highlightthickness=0)
+        self.cv = tk.Canvas(cuerpo, bg=PANEL2, highlightthickness=0)
         cy = ttk.Scrollbar(cuerpo, orient="vertical", command=self.cv.yview)
         cx = ttk.Scrollbar(cuerpo, orient="horizontal", command=self.cv.xview)
         self.cv.configure(yscrollcommand=cy.set, xscrollcommand=cx.set)
@@ -1535,7 +1446,6 @@ class AppCodigo(_CierraLimpio, tk.Tk):
         for tv in (self.tv_tok, self.tv_err):
             tv.delete(*tv.get_children())
         self.cv.delete("all")
-        self.items, self.sel = [], None
         self.txt_arbol.configure(state="normal")
         self.txt_arbol.delete("1.0", "end")
         self.txt_arbol.configure(state="disabled")
@@ -1598,13 +1508,14 @@ class AppCodigo(_CierraLimpio, tk.Tk):
             if str(lin).isdigit():
                 self.editor.tag_add("err", f"{lin}.0", f"{lin}.end+1c")
 
-        # árbol (texto y gráfico comparten el mismo árbol de presentación)
-        self.vista = a_vista(r.arbol)
+        # árbol texto
         self.txt_arbol.configure(state="normal")
         self.txt_arbol.delete("1.0", "end")
-        self.txt_arbol.insert("1.0", "\n".join(self.vista.dibujar()))
+        self.txt_arbol.insert("1.0", "\n".join(r.arbol.dibujar()))
         self.txt_arbol.configure(state="disabled")
-        self.dibujar_arbol(self.vista)
+
+        # árbol gráfico
+        self.dibujar_arbol(r.arbol)
 
         total_err = len(r.errores_lexicos) + len(r.errores_sintacticos)
         if total_err == 0:
@@ -1612,7 +1523,7 @@ class AppCodigo(_CierraLimpio, tk.Tk):
         else:
             self.estado.configure(text=f"✘ {total_err} error(es)", fg=MAL)
         self.resumen.configure(
-            text=f"Tokens: {n}   ·   Nodos del árbol: {self.vista.contar()}   ·   "
+            text=f"Tokens: {n}   ·   Nodos del árbol: {r.arbol.contar()}   ·   "
                  f"Errores léxicos: {len(r.errores_lexicos)}   ·   "
                  f"Errores sintácticos: {len(r.errores_sintacticos)}")
         self.nb.select(3 if total_err else 1)
@@ -1627,199 +1538,125 @@ class AppCodigo(_CierraLimpio, tk.Tk):
             self.editor.mark_set("insert", f"{lin}.0")
 
     # --------------------------------------------------------- árbol gráfico
-    _paso_y = 92.0
-    NIVEL_Y = 92        # separación vertical entre niveles (px lógicos)
-    HUECO_X = 16        # separación horizontal mínima entre nodos
-
-    def _rrect(self, x1, y1, x2, y2, r, **kw):
-        p = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-             x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-        return self.cv.create_polygon(p, smooth=True, **kw)
+    @staticmethod
+    def _etiquetas(n):
+        arriba = n.tipo if len(n.tipo) <= 26 else n.tipo[:25] + "…"
+        v = "" if n.valor in (None, "") else str(n.valor)
+        v = v.replace("\n", " ")
+        abajo = v if len(v) <= 24 else v[:23] + "…"
+        return arriba, abajo
 
     def dibujar_arbol(self, raiz):
         self.cv.delete("all")
-        self.items, self.sel = [], None
-        self.detalle.configure(text="")
+        self.pos, self.textos_nodo = {}, {}
         if raiz.contar() > self.MAX_NODOS_DIBUJO:
             self.cv.create_text(30, 30, anchor="nw", fill=TXT2, font=("Segoe UI", 12),
                                 text=f"El árbol tiene {raiz.contar()} nodos: es demasiado grande "
                                      f"para dibujarlo.\nUsa la pestaña «Árbol (texto)».")
             return
-        items = []
+        base = tkfont.Font(family="Segoe UI", size=9)
+        anchos, sub = {}, {}
+        GAP = 14
 
-        def construir(n, prof, padre):
-            arriba, abajo, con_valor = etiquetas_vista(n)
-            it = {"id": len(items), "nodo": n, "prof": prof, "padre": padre, "kids": [],
-                  "arriba": arriba, "abajo": abajo, "valor": con_valor}
-            items.append(it)
-            if padre is not None:
-                padre["kids"].append(it)
-            for hijo in n.hijos:
-                construir(hijo, prof + 1, it)
+        def medir(n):
+            a, b = self._etiquetas(n)
+            anchos[id(n)] = max(base.measure(a), base.measure(b), 40) + 18
+            if not n.hijos:
+                sub[id(n)] = anchos[id(n)] + GAP
+            else:
+                for h in n.hijos:
+                    medir(h)
+                sub[id(n)] = max(anchos[id(n)] + GAP, sum(sub[id(h)] for h in n.hijos))
 
-        construir(raiz, 0, None)
-        self.items = items
-        self.escala = 1.0
-        self._redibujar()
+        def colocar(n, x0, prof):
+            sw = sub[id(n)]
+            if n.hijos:
+                cx = x0 + (sw - sum(sub[id(h)] for h in n.hijos)) / 2
+                for h in n.hijos:
+                    colocar(h, cx, prof + 1)
+                    cx += sub[id(h)]
+                centro = (self.pos[id(n.hijos[0])][0] + self.pos[id(n.hijos[-1])][0]) / 2
+            else:
+                centro = x0 + sw / 2
+            self.pos[id(n)] = (centro, prof * 78 + 40, anchos[id(n)], n)
+
+        medir(raiz)
+        colocar(raiz, 0, 0)
+        self._redibujar(raiz)
         self.after(50, self.ajustar)
 
-    def _distribuir(self, m_neg, m_peq, m_val):
-        """Calcula tamaño y posición de cada nodo con las medidas REALES de la fuente
-        al tamaño actual, así las cajas nunca se solapan sea cual sea el zoom."""
-        e = self.escala
-        for it in self.items:
-            m1, m2 = (m_peq, m_val) if it["valor"] else (m_neg, m_neg)
-            texto = max(m1.measure(it["arriba"]), m2.measure(it["abajo"]) if it["abajo"] else 0)
-            it["w"] = max(texto + 22 * e, 56 * e)
-            if it["abajo"]:
-                it["h"] = max(58 * e, m1.metrics("linespace") + m2.metrics("linespace") + 16)
-            else:
-                it["h"] = max(40 * e, m1.metrics("linespace") + 14)
-        self._paso_y = max(self.NIVEL_Y * e, max(it["h"] for it in self.items) + 32 * e)
-        for it in reversed(self.items):          # los hijos siempre tienen id mayor que el padre
-            it["sub"] = max(it["w"] + self.HUECO_X * e, sum(k["sub"] for k in it["kids"]))
-
-        def colocar(it, x0):
-            if it["kids"]:
-                cx = x0 + (it["sub"] - sum(k["sub"] for k in it["kids"])) / 2
-                for k in it["kids"]:
-                    colocar(k, cx)
-                    cx += k["sub"]
-                it["x"] = (it["kids"][0]["x"] + it["kids"][-1]["x"]) / 2
-            else:
-                it["x"] = x0 + it["sub"] / 2
-
-        colocar(self.items[0], 0)
-
-    def _redibujar(self):
-        if not self.items:
+    def _redibujar(self, raiz=None):
+        if raiz is None:
+            if not self.resultado:
+                return
+            raiz = self.resultado.arbol
+        if not self.pos:
             return
-        e, cv = self.escala, self.cv
-        cv.delete("all")
-        f_neg = ("Segoe UI", max(7, int(round(11 * e))), "bold")
-        f_peq = ("Segoe UI", max(6, int(round(9 * e))))
-        f_val = ("Segoe UI", max(7, int(round(12 * e))), "bold")
-        self._distribuir(*(tkfont.Font(font=f) for f in (f_neg, f_peq, f_val)))
-        grosor = max(1, int(round(2 * e)))
-        flecha = (max(6, 11 * e), max(7, 13 * e), max(3, 5 * e))
+        e = self.escala
+        self.cv.delete("all")
+        self.textos_nodo = {}
+        f1 = tkfont.Font(family="Segoe UI", size=max(5, int(round(8 * e))))
+        f2 = tkfont.Font(family="Segoe UI", size=max(6, int(round(10 * e))), weight="bold")
+        h = 40 * e
+        nodos = list(self.pos.values())
 
-        def pos(it):
-            return it["x"], 50 * e + it["prof"] * self._paso_y
-
-        for it in self.items:                                   # flechas (debajo de los nodos)
-            p = it["padre"]
-            if p is None:
-                continue
-            px, py = pos(p)
-            cx, cy = pos(it)
-            py += p["h"] / 2
-            cy -= it["h"] / 2
-            my = (py + cy) / 2
-            cv.create_line(px, py, px, my, cx, my, cx, cy, smooth=True, fill=COLOR_FLECHA,
-                           width=grosor, arrow=tk.LAST, arrowshape=flecha)
-
-        for it in self.items:                                   # nodos
-            x, y = pos(it)
-            w, h = it["w"], it["h"]
-            relleno, borde = ESTILO_NODO[it["nodo"].cat]
-            self._rrect(x - w / 2, y - h / 2, x + w / 2, y + h / 2, 9 * e, fill=relleno,
-                        outline=borde, width=grosor, tags=(f"n{it['id']}", f"s{it['id']}"))
-            etiqueta = (f"n{it['id']}",)
-            if it["abajo"]:
-                f1, f2 = (f_peq, f_val) if it["valor"] else (f_neg, f_neg)
-                cv.create_text(x, y - h * 0.22, text=it["arriba"], fill="white", font=f1, tags=etiqueta)
-                cv.create_text(x, y + h * 0.20, text=it["abajo"], fill="white", font=f2, tags=etiqueta)
+        def lineas(n):
+            x, y, w, _ = self.pos[id(n)]
+            for hijo in n.hijos:
+                hx, hy, hw, _ = self.pos[id(hijo)]
+                self.cv.create_line(x * e, y * e + h / 2, hx * e, hy * e - h / 2,
+                                    fill="#3a4b73", width=max(1, int(e)), smooth=True)
+                lineas(hijo)
+        lineas(raiz)
+        for x, y, w, n in nodos:
+            a, b = self._etiquetas(n)
+            col = color_de(n)
+            r = self.cv.create_rectangle((x - w / 2) * e, y * e - h / 2, (x + w / 2) * e,
+                                         y * e + h / 2, fill=col, outline="#9ab", width=1)
+            if b:
+                t1 = self.cv.create_text(x * e, y * e - h * 0.22, text=a, fill="#cfe3ff", font=f1)
+                t2 = self.cv.create_text(x * e, y * e + h * 0.18, text=b, fill="white", font=f2)
+                ids = (r, t1, t2)
             else:
-                cv.create_text(x, y, text=it["arriba"], fill="white", font=f_neg, tags=etiqueta)
-
-        bb = cv.bbox("all")
+                t1 = self.cv.create_text(x * e, y * e, text=a, fill="white", font=f2)
+                ids = (r, t1)
+            desc = n.tipo + (f": {n.valor}" if n.valor not in (None, "") else "")
+            if n.linea:
+                desc += f"   (línea {n.linea})"
+            for i in ids:
+                self.textos_nodo[i] = desc
+        bb = self.cv.bbox("all")
         if bb:
-            cw = max(cv.winfo_width(), 300)
+            cw = max(self.cv.winfo_width(), 300)
             ancho = bb[2] - bb[0]
             dx = max(30, (cw - ancho) / 2) - bb[0]
-            cv.move("all", dx, 30 - bb[1])
-            cv.configure(scrollregion=(0, 0, max(cw, ancho + dx + 30), bb[3] - bb[1] + 60))
-        self._pintar_seleccion()
-
-    def _pintar_seleccion(self):
-        e = self.escala
-        for it in self.items:
-            self.cv.itemconfigure(f"s{it['id']}", outline=ESTILO_NODO[it["nodo"].cat][1],
-                                  width=max(1, int(round(2 * e))))
-        if self.sel is None or self.sel >= len(self.items):
-            return
-
-        def marcar(it, nivel):
-            self.cv.itemconfigure(f"s{it['id']}", outline="#fde047",
-                                  width=max(3, int(round((5 if nivel == 0 else 3) * e))))
-            for k in it["kids"]:
-                marcar(k, nivel + 1)
-
-        marcar(self.items[self.sel], 0)
-
-    def alternar_ampliado(self):
-        """Oculta (o devuelve) el editor y los controles para dar toda la ventana al árbol."""
-        if not self.ampliado:
-            self._pack_info = [(w, {k: v for k, v in w.pack_info().items() if k != "in"})
-                               for w in self._arriba]
-            for w in self._arriba:
-                w.pack_forget()
-            self.nb.select(1)
-            self.btn_ampliar.configure(text="⤡ Restaurar")
-        else:
-            for w, info in self._pack_info:
-                w.pack(before=self.nb, **info)
-            self.btn_ampliar.configure(text="⤢ Ampliar")
-        self.ampliado = not self.ampliado
-        self.after(80, self.ajustar)
+            self.cv.move("all", dx, 30 - bb[1])
+            self.cv.configure(scrollregion=(0, 0, max(cw, ancho + dx + 30),
+                                            bb[3] - bb[1] + 60))
 
     def zoom(self, factor):
         self.escala = max(0.2, min(3.0, self.escala * factor))
         self._redibujar()
 
     def ajustar(self):
-        if not self.items:
+        if not self.pos:
             return
         self.update_idletasks()
-        prof = max(it["prof"] for it in self.items)
-        alto = 50 + prof * self.NIVEL_Y + 70
+        xs = [x - w / 2 for x, _, w, _ in self.pos.values()]
+        xe = [x + w / 2 for x, _, w, _ in self.pos.values()]
+        ys = [y for _, y, _, _ in self.pos.values()]
+        ancho, alto = max(xe) - min(xs) + 60, max(ys) + 100
         cw, ch = max(self.cv.winfo_width(), 300), max(self.cv.winfo_height(), 200)
-        # primero por alto (sin bajar de 0.6: si es muy profundo se desplaza en vertical)...
-        self.escala = max(0.6, min(1.4, ch / alto))   # (mínimo legible)
-        for _ in range(5):                      # ...y luego se reduce hasta que quepa a lo ancho
-            self._redibujar()
-            bb = self.cv.bbox("all")
-            if not bb or bb[2] - bb[0] <= cw - 40:
-                break
-            self.escala = max(0.5, self.escala * (cw - 50) / (bb[2] - bb[0]))
-        else:
-            self._redibujar()
+        self.escala = max(0.25, min(1.6, cw / ancho, ch / alto))
+        self._redibujar()
+        self.cv.xview_moveto(0)
         self.cv.yview_moveto(0)
-        self.centrar_en_raiz()
-
-    def centrar_en_raiz(self):
-        """En árboles más anchos que la ventana, empieza la vista centrada en la raíz."""
-        region = self.cv.cget("scrollregion").split()
-        caja = self.cv.bbox("n0")
-        if len(region) == 4 and caja:
-            ancho_total = float(region[2]) - float(region[0])
-            centro = (caja[0] + caja[2]) / 2
-            self.cv.xview_moveto(max(0.0, (centro - self.cv.winfo_width() / 2) / max(ancho_total, 1)))
 
     def _clic_cv(self, e):
         self.cv.scan_mark(e.x, e.y)
-        i = next((int(t[1:]) for t in self.cv.gettags("current")
-                  if t[0] == "n" and t[1:].isdigit()), None)
-        if i is None or i >= len(self.items):
-            return
-        self.sel = i
-        self._pintar_seleccion()
-        n = self.items[i]["nodo"]
-        txt = n.tipo + (f": {n.valor}" if n.valor not in (None, "") else "")
-        if n.linea:
-            txt += f"   (línea {n.linea})"
-        txt += f"   ·   {len(n.hijos)} hijo(s)" if n.hijos else "   ·   hoja"
-        self.detalle.configure(text="  Nodo → " + txt)
+        cur = self.cv.find_withtag("current")
+        if cur and cur[0] in self.textos_nodo:
+            self.detalle.configure(text="  Nodo → " + self.textos_nodo[cur[0]])
 
 
 # ==========================================================================
